@@ -6,3 +6,6 @@ Uses Google maps api to get the Latitude and Longitude of a location and persist
 
 Sample : URL 
 http://[serverip]:8080/locations
+******************Note
+Authorization Bearer <AuthToken>
+Please use the access token for PUT Operations
