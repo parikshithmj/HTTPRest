@@ -53,7 +53,7 @@ type TripJsonObjPutResp struct{
     Eta float64 `json:"uber_wait_time_eta"`
 }
 type TripJsonObj struct{
-    LocationIds[5] string `json:"location_ids"`
+    LocationIds[10] string `json:"location_ids"`
     Starting string `json:"starting_from_location_id"` 
 }
 
@@ -279,13 +279,15 @@ func postTrips(rw http.ResponseWriter, req *http.Request, p httprouter.Params) {
     combFinArr := strings.Split(comb,"\n")
     combLen := len(combFinArr)
     var minDistance float64 = 10000
+    var prod float64 = 1000000
     var minInd int
     var best Best
 
     var dur,est,dis float64
     var i int
+    var result2,result3 JsonObj
     for i=0;i<combLen-1;i++{  
-         var result2,result3 JsonObj
+         
         combArr := strings.Split(combFinArr[i],",")
         dur =0
         est =0
@@ -308,6 +310,7 @@ func postTrips(rw http.ResponseWriter, req *http.Request, p httprouter.Params) {
                 est = est + test
                 dis = dis + tdis
                 fmt.Println("1Between ",tripJsonObj.Starting," and ",combArr[1],"attr ar",tdur,test,tdis)
+                prod = dis*est
                 return
         }
        
@@ -359,14 +362,15 @@ func postTrips(rw http.ResponseWriter, req *http.Request, p httprouter.Params) {
             
             }
         }
-        if minDistance > dis{
+        if prod > dis*est{
                 minInd = i
+                prod = dis*est
                 minDistance = dis
                 best.Distance = dis
                 best.Duration = dur
                 best.Estimate =est
                 }
-        fmt.Println("Total is dur",dur,"est is",est,"dis is ",dis,"and minInd",minInd,"i is ",i)
+        fmt.Println("Total is dur",dur,"est is",est,"dis is ",dis,"and minInd",minInd,"i is ",i,"minDistance",minDistance)
     
    }
            
@@ -381,13 +385,36 @@ func postTrips(rw http.ResponseWriter, req *http.Request, p httprouter.Params) {
         tripJsonObjResp.Starting= tripJsonObj.Starting
         splitArr := strings.Split(combFinArr[minInd],",")
         tripJsonObjResp.BestRoute = make([]string, len(splitArr)-1)
-        for i:=0;i<len(tripJsonObj.LocationIds[i]);i++{
+        var l int
+        for i=0;i<len(tripJsonObj.LocationIds[i]);i++{
         tripJsonObjResp.BestRoute[i] = splitArr[i+1]
-        
+        l = i 
         }
-        tripJsonObjResp.TotalCost = best.Estimate
-        tripJsonObjResp.TotalDistance = best.Distance
-        tripJsonObjResp.TotalDuration = best.Duration
+
+            id,_ = strconv.Atoi(tripJsonObjResp.BestRoute[l-1])
+            if err := c.Find(bson.M{"id":id}).One(&result2);err!=nil{
+            rw.WriteHeader(404)
+            return 
+            }
+            id_next ,_ := strconv.Atoi(tripJsonObjResp.Starting)
+            if err := c.Find(bson.M{"id":id_next}).One(&result3);err!=nil{
+            rw.WriteHeader(404)
+            return 
+            }
+            fmt.Println("Going back to ",id_next)
+            src.Lat =  result2.Coordinate.Lat
+            src.Lng =  result2.Coordinate.Lng
+            dest.Lat = result3.Coordinate.Lat
+            dest.Lng = result3.Coordinate.Lng
+            tdur,test,tdis = invokeUberApi(src,dest,rw)
+                // dur = dur +tdur
+                // est = est + test
+                // dis = dis + tdis
+        tripJsonObjResp.TotalCost = best.Estimate + test
+        tripJsonObjResp.TotalDistance = best.Distance + tdis
+        tripJsonObjResp.TotalDuration = best.Duration + tdur
+
+
         if err := c.Insert(&TripJsonObjResp{id,tripJsonObjResp.Status,tripJsonObjResp.Starting,tripJsonObjResp.BestRoute,tripJsonObjResp.TotalCost,tripJsonObjResp.TotalDuration,tripJsonObjResp.TotalDistance}) ;err != nil {
         panic(err)
         }
@@ -540,7 +567,7 @@ func UrlEncoded(str string) (string, error) {
     return u.String(), nil
 }
 func invokeUberApi(src Coordinate,dest Coordinate,rw http.ResponseWriter)(duration,estimate,distance float64) {
-var highF,lowF,durationF,distanceF float64
+var lowF,durationF,distanceF float64
 url := "https://api.uber.com/v1/estimates/price?start_latitude="+strconv.FormatFloat(src.Lat, 'f', 6, 64)+"&start_longitude="+strconv.FormatFloat(src.Lng, 'f', 6, 64)+"&end_latitude="+strconv.FormatFloat(dest.Lat, 'f', 6, 64)+"&end_longitude="+strconv.FormatFloat(dest.Lng, 'f', 6, 64)
 client := &http.Client{}
 req, _ := http.NewRequest("GET",url,nil)
@@ -569,19 +596,15 @@ if err := json.Unmarshal(contents, &resp);
             durationF = float64(tmp1)
              default: fmt.Println("No Match!")
          }
-            high :=first["high_estimate"]
+           
             low := first["low_estimate"]
-             switch high := high.(type) {
-            case float64:
-            highF = float64(high)
-             default: fmt.Println("No Match!")
-         }
+             
             switch low := low.(type) {
             case float64:
             lowF = float64(low)
              default: fmt.Println("No Match!")
          }
-            estimate = (highF + lowF)/2
+            estimate = lowF
 
             
             switch tmp := first["distance"].(type) {
